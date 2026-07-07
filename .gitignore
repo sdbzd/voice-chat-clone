@@ -2,4 +2,3 @@ node_modules/
 worker/node_modules/
 *.log
 .wrangler/
-.github/workflows/
