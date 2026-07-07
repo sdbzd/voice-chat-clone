@@ -1,0 +1,15 @@
+name = "voice-chat-clone"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# ── 环境变量（由 wrangler secret 注入，不写明文到 git） ──
+# GROQ_API_KEY      — Groq API Key (语音识别 Whsiper + LLM)
+# FISH_API_KEY      — Fish Audio API Key (语音克隆 + TTS)
+# API_PROXY_KEY     — [可选] 已有 API Proxy Hub 的 X-API-Key，走网关调 LLM
+# DEFAULT_CHAT_MODEL — [可选] 默认对话模型
+
+# ── 路由 ──
+workers_dev = true
+routes = [
+  { pattern = "voice-chat.sdbzd3.workers.dev", custom_domain = false },
+]
