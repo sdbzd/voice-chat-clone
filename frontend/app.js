@@ -3,9 +3,10 @@
  */
 
 // ─── 配置 ─────────────────────────────────────────────────────────────────────
-const API_BASE = window.location.origin;
-// 开发时如果前端和 Worker 不同源，可以手动指定：
-// const API_BASE = 'https://voice-chat.sdbzd3.workers.dev';
+// 生产环境：Worker API 地址
+const API_BASE = 'https://voice-chat-clone.sdbzd3.workers.dev';
+// 开发时如果同源部署，改为：
+// const API_BASE = window.location.origin;
 
 const CALIBRATION_TEXT =
   '今天天气真不错，阳光明媚，微风习习。我正在测试语音克隆的效果，希望这个系统能够准确还原我的声音，让我用自然的方式和AI对话。';
