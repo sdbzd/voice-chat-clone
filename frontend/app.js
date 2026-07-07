@@ -103,10 +103,17 @@ async function startRecording() {
       stream.getTracks().forEach(t => t.stop());
       const blob = new Blob(state.audioChunks, { type: state.mediaRecorder.mimeType });
       if (blob.size < 1000) {
-        setStatus(state.config?.fish_available ? 'ready' : 'idle', '录音太短');
+        setStatus(state.config?.proxy_available ? 'ready' : 'idle', '录音太短');
         return;
       }
-      await processAudio(blob);
+      // 转成 WAV 格式（HF Whisper 需要）
+      const wavBlob = await convertToWav(blob);
+      if (wavBlob) {
+        await processAudio(wavBlob);
+      } else {
+        // 转换失败，直接发原始格式
+        await processAudio(blob);
+      }
     };
 
     state.mediaRecorder.start();
@@ -277,7 +284,61 @@ async function tts(text, voiceId) {
   }
 }
 
-// ─── 浏览器原生 TTS 回退 ─────────────────────────────────────────────────────
+// ─── 录音 → WAV 转换（HF Whisper 兼容） ──────────────────────────────────────
+
+async function convertToWav(audioBlob) {
+  try {
+    const arrayBuffer = await audioBlob.arrayBuffer();
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+    // 转成 16kHz 16-bit 单声道 WAV
+    const sampleRate = 16000;
+    const numChannels = 1;
+    const length = Math.round(audioBuffer.length * sampleRate / audioBuffer.sampleRate);
+    const offlineCtx = new OfflineAudioContext(numChannels, length, sampleRate);
+    const source = offlineCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(offlineCtx.destination);
+    source.start();
+    const rendered = await offlineCtx.startRendering();
+
+    // 编码为 WAV
+    const numSamples = rendered.length;
+    const wavBuffer = new ArrayBuffer(44 + numSamples * 2);
+    const view = new DataView(wavBuffer);
+
+    // WAV header
+    const writeStr = (offset, str) => {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    };
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);  // PCM
+    view.setUint16(22, 1, true);  // mono
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    view.setUint32(40, numSamples * 2, true);
+
+    // PCM data
+    const channelData = rendered.getChannelData(0);
+    for (let i = 0; i < numSamples; i++) {
+      const s = Math.max(-1, Math.min(1, channelData[i]));
+      view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+
+    return new Blob([wavBuffer], { type: 'audio/wav' });
+  } catch (e) {
+    console.warn('WAV conversion failed, using original format:', e);
+    return null;
+  }
+}
 
 function speakBrowser(text) {
   if (!window.speechSynthesis) return;
