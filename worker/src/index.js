@@ -46,40 +46,55 @@ export default {
 
 async function handleConfig(env) {
   return json({
-    groq_models: [
-      'whisper-large-v3',
-      'whisper-large-v3-turbo',
+    asr_backends: ['hf_whisper', 'groq_whisper'],
+    default_asr_backend: env.HF_API_TOKEN || env.API_PROXY_KEY ? 'hf_whisper' : 'groq_whisper',
+    default_asr_model: 'whisper-large-v3-turbo',
+    chat_models: [
       'llama-3.3-70b-versatile',
       'llama-3.1-8b-instant',
       'qwen/qwen3-32b',
       'gemma2-9b-it',
       'mixtral-8x7b-32768',
     ],
-    default_asr_model: 'whisper-large-v3-turbo',
     default_chat_model: env.DEFAULT_CHAT_MODEL || 'llama-3.3-70b-versatile',
     fish_available: !!env.FISH_API_KEY,
     proxy_available: !!env.API_PROXY_KEY,
   });
 }
 
-// ─── ASR: 语音 → 文字 (Groq Whisper) ──────────────────────────────────────────
+// ─── ASR: 语音 → 文字 ─────────────────────────────────────────────────────────
+// 支持两个后端: hf_whisper (通过 API Proxy Hub) 或 groq_whisper (直接走 Groq)
 
 async function handleASR(request, env) {
   const formData = await request.formData();
   const audio = formData.get('audio');
-  const model = formData.get('model') || 'whisper-large-v3-turbo';
+  const backend = formData.get('backend') || (env.API_PROXY_KEY ? 'hf_whisper' : 'groq_whisper');
 
   if (!audio) return json({ error: '缺少 audio 文件' }, 400);
 
+  if (backend === 'hf_whisper' && env.API_PROXY_KEY) {
+    return hfWhisperASR(audio, env.API_PROXY_KEY);
+  }
+
+  if (backend === 'groq_whisper' && env.GROQ_API_KEY) {
+    return groqWhisperASR(audio, env.GROQ_API_KEY);
+  }
+
+  return json({
+    error: `无可用的 ASR 后端 (backend=${backend}, proxy=${!!env.API_PROXY_KEY}, groq=${!!env.GROQ_API_KEY})`,
+  }, 400);
+}
+
+async function groqWhisperASR(audio, apiKey) {
   const body = new FormData();
   body.append('file', audio, audio.name || 'recording.webm');
-  body.append('model', model);
+  body.append('model', 'whisper-large-v3-turbo');
   body.append('language', 'zh');
   body.append('response_format', 'json');
 
   const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${env.GROQ_API_KEY}` },
+    headers: { Authorization: `Bearer ${apiKey}` },
     body,
   });
 
@@ -90,6 +105,31 @@ async function handleASR(request, env) {
 
   const result = await res.json();
   return json({ text: result.text.trim() });
+}
+
+async function hfWhisperASR(audio, proxyKey) {
+  // HF Inference API: 直接用原始音频字节 POST
+  const audioBytes = await audio.arrayBuffer();
+
+  const res = await fetch(
+    'https://api-proxy-hub.sdbzd3.workers.dev/hfi/models/openai/whisper-large-v3-turbo',
+    {
+      method: 'POST',
+      headers: {
+        'X-API-Key': proxyKey,
+        'Content-Type': audio.type || 'audio/webm',
+      },
+      body: audioBytes,
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.text();
+    return json({ error: `HF ASR 失败: ${err}` }, res.status);
+  }
+
+  const result = await res.json();
+  return json({ text: (result.text || '').trim() });
 }
 
 // ─── CHAT: LLM 对话 ───────────────────────────────────────────────────────────

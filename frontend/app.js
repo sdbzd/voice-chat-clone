@@ -209,7 +209,10 @@ async function processAudio(audioBlob) {
 async function asr(audioBlob) {
   const formData = new FormData();
   formData.append('audio', audioBlob, 'recording.webm');
-  formData.append('model', asrModelSelect.value);
+  // 优先用 HF Whisper（走 API Proxy Hub），否则回退 Groq
+  if (state.config?.proxy_available) {
+    formData.append('backend', 'hf_whisper');
+  }
 
   const res = await fetch(`${API_BASE}/api/asr`, { method: 'POST', body: formData });
   const data = await res.json();
